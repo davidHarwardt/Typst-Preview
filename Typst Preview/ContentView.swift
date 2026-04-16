@@ -211,22 +211,15 @@ struct ContentView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            PreviewBackdrop()
+            if let document = controller.document {
+                PreviewDocumentView(document: document)
+                    .ignoresSafeArea()
+            } else {
+                PreviewBackdrop()
 
-            ZStack {
-                if let document = controller.document {
-                    DocumentSurface {
-                        PreviewDocumentView(document: document)
-                    }
-                        .padding(.top, 28)
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 14)
-                } else {
-                    EmptyPreviewState(controller: controller)
-                        .padding(.top, 72)
-                }
+                EmptyPreviewState(controller: controller)
+                    .padding(.top, 72)
             }
-            .padding(6)
 
             TopChrome(isHovered: isTopChromeHovered, window: window)
                 .padding(.top, 10)
@@ -238,6 +231,10 @@ struct ContentView: View {
                 }
         }
         .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
+        }
         .toolbarVisibility(.hidden, for: .windowToolbar)
         .background(WindowAccessor { window in
             self.window = window
@@ -249,6 +246,13 @@ struct ContentView: View {
     }
 
     private func configure(window: NSWindow) {
+        window.level = .floating
+        window.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.isReleasedWhenClosed = false
+        window.hasShadow = false
+
         guard window.identifier?.rawValue != "typst-preview-window" else { return }
 
         window.identifier = NSUserInterfaceItemIdentifier("typst-preview-window")
@@ -262,12 +266,6 @@ struct ContentView: View {
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
         window.isMovableByWindowBackground = false
-        window.level = .floating
-        window.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.isReleasedWhenClosed = false
-        window.hasShadow = false
 
         if let screen = window.screen ?? NSScreen.main {
             let visibleFrame = screen.visibleFrame
@@ -353,7 +351,7 @@ private struct DragHandle: View {
 
     var body: some View {
         WindowDragHandle()
-            .frame(width: 76, height: 20)
+            .frame(width: 140, height: 28)
             .overlay {
                 Capsule(style: .continuous)
                     .fill(Color.primary.opacity(isHovered ? 0.34 : 0.16))
@@ -447,13 +445,8 @@ private struct GlassButtonTreatment: ViewModifier {
 
 private struct WindowShellTreatment: ViewModifier {
     func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content
-                .glassEffect(.regular.tint(Color.primary.opacity(0.03)), in: RoundedRectangle(cornerRadius: 32, style: .continuous))
-        } else {
-            content
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 32, style: .continuous))
-        }
+        content
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 32, style: .continuous))
     }
 }
 
@@ -489,6 +482,7 @@ private struct PDFPreview: NSViewRepresentable {
         pdfView.displayMode = .singlePageContinuous
         pdfView.displayDirection = .vertical
         pdfView.displaysAsBook = false
+        pdfView.displaysPageBreaks = false
         pdfView.backgroundColor = .clear
         pdfView.maxScaleFactor = 8
         pdfView.minScaleFactor = 0.1
@@ -542,9 +536,38 @@ private struct PDFPreview: NSViewRepresentable {
 }
 
 private final class ZoomablePDFView: PDFView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        makeChromeTransparent()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        makeChromeTransparent()
+    }
+
+    override func layout() {
+        super.layout()
+        makeChromeTransparent()
+    }
+
     override func magnify(with event: NSEvent) {
         let updatedScale = scaleFactor * (1 + event.magnification)
         scaleFactor = min(max(updatedScale, minScaleFactor), maxScaleFactor)
+    }
+
+    private func makeChromeTransparent() {
+        backgroundColor = .clear
+
+        if let scrollView = subviews.compactMap({ $0 as? NSScrollView }).first {
+            scrollView.drawsBackground = false
+            scrollView.backgroundColor = .clear
+            scrollView.contentView.drawsBackground = false
+            scrollView.contentView.backgroundColor = .clear
+        }
+
+        documentView?.wantsLayer = true
+        documentView?.layer?.backgroundColor = NSColor.clear.cgColor
     }
 }
 
@@ -643,7 +666,7 @@ private final class DragHandleView: NSView {
     override var isOpaque: Bool { false }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        bounds.contains(point) ? self : nil
+        bounds.insetBy(dx: -10, dy: -6).contains(point) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) {
