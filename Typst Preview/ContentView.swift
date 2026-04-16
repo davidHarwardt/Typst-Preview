@@ -51,6 +51,11 @@ final class PreviewController: ObservableObject {
     }
 
     func open(url: URL) {
+        if ["http", "https"].contains(url.scheme) {
+            print("opening \(url)")
+            document = PreviewDocument(url: url, kind: .svg, revision: revision)
+            return
+        }
         let standardizedURL = normalize(url)
         let fileManager = FileManager.default
         let shouldRestartWatcher = document?.url != standardizedURL || fileWatcher == nil
@@ -108,6 +113,8 @@ final class PreviewController: ObservableObject {
 
     private func url(from argument: String) -> URL? {
         if argument.hasPrefix("file://"), let url = URL(string: argument) {
+            return url
+        } else if argument.hasPrefix("https://") || argument.hasPrefix("http://"), let url = URL(string: argument) {
             return url
         }
 
@@ -193,6 +200,11 @@ final class PreviewController: ObservableObject {
 
 private extension PreviewController.PreviewDocument.Kind {
     init?(url: URL) {
+        if ["http", "https"].contains(url.scheme) {
+            self = .svg
+            return
+        }
+        
         switch url.pathExtension.lowercased() {
         case "pdf":
             self = .pdf
@@ -222,7 +234,7 @@ struct ContentView: View {
             }
 
             TopChrome(isHovered: isTopChromeHovered, window: window)
-                .padding(.top, 10)
+                // .padding(.top, 10)
                 .padding(.horizontal, 14)
                 .zIndex(10)
                 .onHover { hovering in
@@ -231,7 +243,7 @@ struct ContentView: View {
                     }
                 }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        // .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
         .toolbarVisibility(.hidden, for: .windowToolbar)
         .background(WindowAccessor { window in
             self.window = window
@@ -239,6 +251,7 @@ struct ContentView: View {
         })
         .modifier(WindowShellTreatment())
         .compositingGroup()
+        .ignoresSafeArea()
     }
 
     private func configure(window: NSWindow) {
@@ -252,7 +265,7 @@ struct ContentView: View {
         guard window.identifier?.rawValue != "typst-preview-window" else { return }
 
         window.identifier = NSUserInterfaceItemIdentifier("typst-preview-window")
-        window.title = ""
+        window.title = "Typst Preview"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.toolbar = nil
@@ -298,6 +311,9 @@ private struct PreviewBackdrop: View {
 
 private struct EmptyPreviewState: View {
     @ObservedObject var controller: PreviewController
+    @State var previewUrlStr: String = ""
+    @State var invalidUrl = false
+    @FocusState var urlFocused: Bool
 
     var body: some View {
         VStack(spacing: 14) {
@@ -314,10 +330,42 @@ private struct EmptyPreviewState: View {
                 controller.presentOpenPanel()
             }
             .modifier(GlassButtonTreatment())
+            
+            Text("or enter a URL")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 340)
+
+            HStack {
+                TextField("Enter a URL", text: $previewUrlStr, prompt: Text(verbatim: "localhost:1234"))
+                    .focused($urlFocused)
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            urlFocused = false
+                        }
+                }.onSubmit(openPreviewUrl)
+                Button("Open") {
+                    openPreviewUrl()
+                }
+                .alert(isPresented: $invalidUrl) {
+                    Alert(title: Text("Invalid URL"))
+                }
+                .modifier(GlassButtonTreatment())
+            }
+            .frame(maxWidth: 220)
         }
         .padding(.horizontal, 26)
         .padding(.vertical, 24)
         .modifier(GlassCardTreatment())
+    }
+    
+    private func openPreviewUrl() {
+        if let url = URL(string: previewUrlStr) {
+            invalidUrl = false
+            controller.open(url: url)
+        } else {
+            invalidUrl = true
+        }
     }
 }
 
@@ -341,6 +389,7 @@ private struct TopChrome: View {
             HStack {
                 Spacer()
                 CloseButton(isVisible: isHovered, window: window)
+                    .padding(.top, 10)
             }
         }
         .frame(height: 32)
@@ -397,7 +446,7 @@ private struct DocumentSurface<Content: View>: View {
                 }
 
             content
-                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                 .padding(1)
         }
     }
@@ -439,7 +488,7 @@ private struct WindowShellTreatment: ViewModifier {
     func body(content: Content) -> some View {
         if #available(macOS 26.0, *) {
             content
-                .glassEffect(.regular.tint(Color.primary.opacity(0.03)), in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+                .glassEffect(.regular.tint(Color.accentColor.opacity(0.015)).interactive(false), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         } else {
             content
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 32, style: .continuous))
@@ -480,6 +529,7 @@ private struct PDFPreview: NSViewRepresentable {
         pdfView.displayDirection = .vertical
         pdfView.displaysAsBook = false
         pdfView.displaysPageBreaks = false
+        pdfView.pageBreakMargins = NSEdgeInsets(top: 0, left: 0, bottom: 8, right: 0)
         pdfView.backgroundColor = .clear
         pdfView.maxScaleFactor = 8
         pdfView.minScaleFactor = 0.1
@@ -526,6 +576,15 @@ private struct PDFPreview: NSViewRepresentable {
                     pdfView.minScaleFactor = min(fittedScale, 0.1)
                     pdfView.scaleFactor = fittedScale
                     context.coordinator.hasAppliedInitialFit = true
+
+                    if let firstPage = document.page(at: 0) {
+                        let pageBounds = firstPage.bounds(for: .cropBox)
+                        let topDestination = PDFDestination(
+                            page: firstPage,
+                            at: CGPoint(x: pageBounds.minX, y: pageBounds.maxY)
+                        )
+                        pdfView.go(to: topDestination)
+                    }
                 }
             }
         }
@@ -574,18 +633,20 @@ private struct SVGPreview: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        // configuration.defaultWebpagePreferences.allowsContentJavaScript = false
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.setValue(false, forKey: "drawsBackground")
-        webView.allowsMagnification = true
+        // webView.allowsMagnification = true
         return webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         let _ = revision
-        let svgMarkup = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        webView.loadHTMLString(htmlDocument(for: svgMarkup), baseURL: url.deletingLastPathComponent())
+        print("url: \(url)")
+        webView.load(.init(url: url))
+        // let svgMarkup = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        // webView.loadHTMLString(htmlDocument(for: svgMarkup), baseURL: url.deletingLastPathComponent())
     }
 
     private func htmlDocument(for svgMarkup: String) -> String {
@@ -661,6 +722,10 @@ private struct WindowDragHandle: NSViewRepresentable {
 
 private final class DragHandleView: NSView {
     override var isOpaque: Bool { false }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         bounds.insetBy(dx: -10, dy: -6).contains(point) ? self : nil
