@@ -224,6 +224,7 @@ struct ContentView: View {
             TopChrome(isHovered: isTopChromeHovered, window: window)
                 .padding(.top, 10)
                 .padding(.horizontal, 14)
+                .zIndex(10)
                 .onHover { hovering in
                     withAnimation(.easeOut(duration: 0.16)) {
                         isTopChromeHovered = hovering
@@ -231,10 +232,6 @@ struct ContentView: View {
                 }
         }
         .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 32, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
-        }
         .toolbarVisibility(.hidden, for: .windowToolbar)
         .background(WindowAccessor { window in
             self.window = window
@@ -242,7 +239,6 @@ struct ContentView: View {
         })
         .modifier(WindowShellTreatment())
         .compositingGroup()
-        .padding(8)
     }
 
     private func configure(window: NSWindow) {
@@ -251,7 +247,7 @@ struct ContentView: View {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.isReleasedWhenClosed = false
-        window.hasShadow = false
+        window.hasShadow = true
 
         guard window.identifier?.rawValue != "typst-preview-window" else { return }
 
@@ -331,34 +327,23 @@ private struct TopChrome: View {
 
     var body: some View {
         ZStack {
+            WindowDragHandle()
+                .frame(maxWidth: .infinity)
+                .frame(height: 32)
+                .overlay {
+                    Capsule(style: .continuous)
+                        .fill(Color.primary.opacity(isHovered ? 0.42 : 0.28))
+                        .frame(width: isHovered ? 48 : 40, height: 4)
+                }
+                .opacity(1)
+                .scaleEffect(isHovered ? 1 : 0.98)
+
             HStack {
                 Spacer()
                 CloseButton(isVisible: isHovered, window: window)
             }
-
-            HStack {
-                Spacer()
-                DragHandle(isHovered: isHovered)
-                Spacer()
-            }
         }
-        .frame(height: 24)
-    }
-}
-
-private struct DragHandle: View {
-    let isHovered: Bool
-
-    var body: some View {
-        WindowDragHandle()
-            .frame(width: 140, height: 28)
-            .overlay {
-                Capsule(style: .continuous)
-                    .fill(Color.primary.opacity(isHovered ? 0.34 : 0.16))
-                    .frame(width: isHovered ? 44 : 36, height: 4)
-            }
-            .opacity(isHovered ? 1 : 0.84)
-            .scaleEffect(isHovered ? 1 : 0.96)
+        .frame(height: 32)
     }
 }
 
@@ -381,9 +366,8 @@ private struct CloseButton: View {
                 }
         }
         .buttonStyle(.plain)
-        .opacity(isVisible ? 1 : 0)
-        .scaleEffect(isVisible ? 1 : 0.9)
-        .allowsHitTesting(isVisible)
+        .opacity(isVisible ? 1 : 0.82)
+        .scaleEffect(isVisible ? 1 : 0.96)
     }
 }
 
@@ -424,9 +408,17 @@ private struct GlassCardTreatment: ViewModifier {
         if #available(macOS 26.0, *) {
             content
                 .glassEffect(.regular.tint(Color.primary.opacity(0.03)), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
+                }
         } else {
             content
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
+                }
         }
     }
 }
@@ -445,8 +437,13 @@ private struct GlassButtonTreatment: ViewModifier {
 
 private struct WindowShellTreatment: ViewModifier {
     func body(content: Content) -> some View {
-        content
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+        if #available(macOS 26.0, *) {
+            content
+                .glassEffect(.regular.tint(Color.primary.opacity(0.03)), in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+        } else {
+            content
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+        }
     }
 }
 
