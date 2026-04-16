@@ -9,16 +9,32 @@ import AppKit
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    var previewController: PreviewController?
+    var previewController: PreviewController? {
+        didSet {
+            previewController?.openLaunchArguments()
+
+            if let pendingURL {
+                previewController?.open(url: pendingURL)
+                self.pendingURL = nil
+            }
+        }
+    }
+
+    private var pendingURL: URL?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        previewController?.openLaunchArguments()
         NSApp.activate(ignoringOtherApps: true)
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let url = urls.first else { return }
-        previewController?.open(url: url)
+
+        if let previewController {
+            previewController.open(url: url)
+        } else {
+            pendingURL = url
+        }
+
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -34,22 +50,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct Typst_PreviewApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var previewController = PreviewController()
+    private let previewController = PreviewController()
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
     }
 
     var body: some Scene {
-        WindowGroup {
+        Window("Typst Preview", id: "main-window") {
             ContentView(controller: previewController)
                 .onAppear {
                     appDelegate.previewController = previewController
                 }
         }
-        .windowResizability(.contentSize)
+        .windowStyle(.hiddenTitleBar)
         .commands {
-            CommandGroup(replacing: .newItem) { }
+            CommandGroup(replacing: .newItem) {
+                Button("Open Preview…") {
+                    previewController.presentOpenPanel()
+                }
+                .keyboardShortcut("o")
+            }
         }
     }
 }
